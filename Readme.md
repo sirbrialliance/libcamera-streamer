@@ -27,3 +27,7 @@ Copy streamer.py to somewhere on the Pi.
 	ln -s /path/to/streamer.py webcamd
 	service webcamd start
 
+In OctoPrint -> Settings -> Webcam & Timelapse:
+
+- Set `Stream URL` to http://pi_host_or_ip:8070/stream.mjpg
+- Set `Snapshot URL` to http://pi_host_or_ip:8070/snapshot.jpg (this is a higher resolution image, makes for better time lapses)
