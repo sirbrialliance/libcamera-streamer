@@ -13,22 +13,43 @@ from http import server
 import threading
 import time
 import simplejpeg
+from pprint import pprint
 
-from libcamera import Transform
+import libcamera, picamera2
 from picamera2 import Picamera2
 from picamera2.encoders import MJPEGEncoder, JpegEncoder
 from picamera2.outputs import FileOutput
 
-STREAM_SIZE = (640, 480)
-PORT = 8070
-# libcamera.Transform(rotation: int = 0, hflip: bool = False, vflip: bool = False, transpose: bool = False)
-# TRANSFORM = Transform(rotation=180)
-TRANSFORM = Transform()
+# Size of live MJPG stream. Pi Camera 3 is 4608x2592, a 16:9 aspect ratio
+STREAM_SIZE = (640, 360)
 
-# Note that when we set a lower resolution, the camera it probably cropping the image a ton.
-# OFC, docs for that are hidden and I can only seem to find the explanation for Pi modules 1 and
-# 2 (picamera) over here https://picamera.readthedocs.io/en/release-1.13/fov.html#camera-modes
-# We're targeting v3 and picamera2
+# Note that OctoPrint is set up with haproxy proxying content from port 8080 to http://host/webcam by default
+PORT = 8070
+
+# libcamera.Transform(rotation: int = 0, hflip: bool = False, vflip: bool = False, transpose: bool = False)
+TRANSFORM = libcamera.Transform()
+# TRANSFORM = Transform(rotation=180)
+
+# The camera likes to crop the image to get to STREAM_SIZE.
+# See
+#   https://picamera.readthedocs.io/en/release-1.13/fov.html#camera-modes (this is for the old picamera lib)
+#   https://github.com/raspberrypi/picamera2/issues/450
+#
+# So here we tell it the exact size of the sensor mode to use so we can scale down from there.
+# Run `libcamera-hello --list-cameras` to get a list of supported modes.
+
+SENSOR_MODE = (2304, 1296) # 2:2 binned mode for Pi Camera 3
+
+CONTROLS = {
+    # See https://datasheets.raspberrypi.com/camera/picamera2-manual.pdf under "Appendix C: Camera controls"
+
+    # "AfMode": libcamera.controls.AfModeEnum.Continuous,
+    "ExposureValue": 0, # from -8 to 8
+
+    # Specify the cropping+scaling in sensor pixels.
+    # "ScalerCrop": [0, 0, 4608, 2592],
+}
+
 
 
 
@@ -44,6 +65,7 @@ def gen_index_page():
     <style>
         html, body {{ margin: 0; padding: 0; color: white; background: #555; }}
         p {{ margin: 10px; }}
+        a {{ color: deepskyblue; }}
     </style>
 </head>
 <body>
@@ -54,8 +76,9 @@ def gen_index_page():
     </p>
     <img src="stream.mjpg" width="{STREAM_SIZE[0]}" height="{STREAM_SIZE[1]}" />
     <br>
-    <br>
-    <a href="snapshot.jpg">High-resolution snapshot</a>
+    <p>
+        <a href="snapshot.jpg">High-resolution snapshot</a>
+    </p>
 </body>
 </html>
 """
@@ -173,26 +196,39 @@ logging.basicConfig(level=logging.DEBUG)
 log.info("Checking camera")
 
 picam2 = Picamera2()
-camera_config_stream = picam2.create_video_configuration(main={"size": STREAM_SIZE,})
+
+raw_mode = None
+for mode in picam2.sensor_modes:
+    if mode["size"] == SENSOR_MODE: raw_mode = mode
+
+if not raw_mode:
+    pprint(picam2.sensor_modes)
+    raise Exception("Failed to find a matching sensor mode")
+
+
+camera_config_stream = picam2.create_video_configuration(
+    main={"size": STREAM_SIZE},
+    raw={
+        "size": raw_mode["size"],
+        "format": raw_mode["format"],
+    },
+)
 camera_config_stream["transform"] = TRANSFORM
-camera_config_snapshot = picam2.create_still_configuration()
+
+camera_config_snapshot = picam2.create_still_configuration(main={"size": SENSOR_MODE})
 camera_config_snapshot["transform"] = TRANSFORM
 
+
 picam2.configure(camera_config_stream)
+picam2.set_controls(CONTROLS)
 picam2.start()
 
+
 jpeg_output = StreamingOutput()
-jpeg_encoder = (MJPEGEncoder(), FileOutput(jpeg_output)) # 22% CPU on my Pi 4
+jpeg_encoder = (MJPEGEncoder(), FileOutput(jpeg_output)) # 22% CPU at 640x480 on my Pi 4, maybe lower qualities around 20%
 # jpeg_encoder = (JpegEncoder(), FileOutput(jpeg_output)) # ~46% CPU on my Pi 4
 picam2.start_encoder(jpeg_encoder[0], jpeg_encoder[1])
 
-# def pumper_thread():
-#     while True:
-#         # log.debug("will pump")
-#         picam2.process_requests(None)
-#         # log.debug("pumped requests")
-#         time.sleep(1)
-# threading.Thread(target=pumper_thread, daemon=True).start()
 
 picam2_lock = threading.Lock()
 log.info("Entering main loop")
