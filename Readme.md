@@ -13,11 +13,17 @@ And by default, OctoPrint uses mjpg-streamer for the webcam view.
 
 # Setup
 
-If you ran `raspi-confg` and turned on Interface Options -> Legacy Camera support that's bad. Turn it off and reboot.
+(Assuming an OctoPi distribution.)
 
-`sudo apt install libcamera0 libcamera-dev libcamera-apps python3-libcamera python3-picamera2`
+If you ran `raspi-confg` and turned on `Interface Options -> Legacy Camera support` that's bad. Turn it off and reboot.
 
+Copy streamer.py to somewhere on the Pi.
 
-todo
-
+	apt install libcamera0 libcamera-dev libcamera-apps python3-libcamera python3-picamera2
+	# Tweak the settings at the start of streamer.py as needed and make sure it runs standalone.
+	cd /root/bin
+	service webcamd stop
+	mv webcamd webcamd.old
+	ln -s /path/to/streamer.py webcamd
+	service webcamd start
 
